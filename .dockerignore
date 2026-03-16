@@ -1,0 +1,7 @@
+MERCADO/
+Mercado_Livre/
+requirements_bot.txt
+*.log
+__pycache__/
+*.pyc
+.env

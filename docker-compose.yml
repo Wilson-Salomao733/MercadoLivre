@@ -1,0 +1,17 @@
+services:
+  afiliado-bot:
+    build: .
+    container_name: afiliado-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./tokens.json:/app/tokens.json
+      - ./enviados.json:/app/enviados.json
+    environment:
+      - PYTHONUNBUFFERED=1
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "3"

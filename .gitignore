@@ -1,0 +1,7 @@
+tokens.json
+enviados.json
+*.log
+__pycache__/
+*.pyc
+.env
+# .env.example NÃO está aqui — ele vai para o GitHub (sem valores reais)
