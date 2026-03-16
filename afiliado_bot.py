@@ -184,15 +184,8 @@ def buscar_produtos_por_keyword(keyword: str, token: str, limit: int = 10) -> li
                 item_id_match = re.search(r"MLB\d{7,12}", link)
                 item_id = item_id_match.group() if item_id_match else link
 
-                # Preço atual: segundo span de fraction (depois do <s>)
                 price_box = card.find("div", class_=re.compile(r"poly-component__price"))
                 if not price_box:
-                    continue
-
-                fractions = price_box.find_all("span", class_=re.compile(r"andes-money-amount__fraction"))
-                cents_els = price_box.find_all("span", class_=re.compile(r"andes-money-amount__cents"))
-
-                if not fractions:
                     continue
 
                 # Preço original (dentro de <s>)
@@ -203,16 +196,26 @@ def buscar_produtos_por_keyword(keyword: str, token: str, limit: int = 10) -> li
                     if orig_frac:
                         preco_orig = float(re.sub(r"\D", "", orig_frac.get_text()) or 0)
 
-                # Preço atual = última fraction (fora do <s>)
-                current_frac = fractions[-1]
-                preco_str = re.sub(r"\D", "", current_frac.get_text())
-                preco = float(preco_str) if preco_str else 0.0
+                # Preço atual: primeira fraction que NÃO está dentro de <s> e NÃO em parcelamento
+                preco = 0.0
+                preco_cents = 0.0
+                for span in price_box.find_all("span", class_=re.compile(r"andes-money-amount__fraction")):
+                    # Ignora se está dentro do <s> (preço original riscado)
+                    if span.find_parent("s"):
+                        continue
+                    # Ignora se está dentro de container de parcelamento
+                    if span.find_parent(class_=re.compile(r"installment|poly-price__installments|andes-money-amount--previous")):
+                        continue
+                    preco = float(re.sub(r"\D", "", span.get_text()) or 0)
+                    # Pega os centavos do mesmo container pai
+                    pai = span.find_parent()
+                    if pai:
+                        cents_el = pai.find("span", class_=re.compile(r"andes-money-amount__cents"))
+                        if cents_el:
+                            preco_cents = float(re.sub(r"\D", "", cents_el.get_text()) or 0) / 100
+                    break
 
-                # Centavos
-                if cents_els:
-                    centavos_str = re.sub(r"\D", "", cents_els[-1].get_text())
-                    if centavos_str:
-                        preco += float(centavos_str) / 100
+                preco += preco_cents
 
                 if preco == 0:
                     continue
