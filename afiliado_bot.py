@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Bot de Afiliados - Mercado Livre → Telegram
+Bot de Afiliados - Mercado Livre + Shopee → Telegram
 Busca automaticamente produtos tech/setup com desconto e envia links de afiliado
 """
 import requests
@@ -8,6 +8,7 @@ import json
 import time
 import re
 import os
+import hashlib
 import schedule
 from datetime import datetime
 from bs4 import BeautifulSoup
@@ -34,6 +35,11 @@ TELEGRAM_CHAT_ID = _require("TELEGRAM_CHAT_ID")
 # ID de afiliado do Mercado Livre
 MATT_TOOL = _require("MATT_TOOL")
 MATT_WORD = _require("MATT_WORD")
+
+# Credenciais Shopee Afiliados
+SHOPEE_APP_ID = _require("SHOPEE_APP_ID")
+SHOPEE_SECRET = _require("SHOPEE_SECRET")
+SHOPEE_GQL    = "https://open-api.affiliate.shopee.com.br/graphql"
 
 # Intervalo entre rodadas (em horas)
 INTERVALO_HORAS = 2
@@ -360,6 +366,90 @@ def enviar_resumo(total: int):
     )
     enviar_telegram(msg)
 
+# ─── SHOPEE ───────────────────────────────────────────────────────────────────
+
+def shopee_gql(query: str, variables: dict = None) -> dict:
+    ts      = int(time.time())
+    payload = json.dumps({"query": query, "variables": variables or {}}, separators=(",", ":"))
+    sig     = hashlib.sha256(f"{SHOPEE_APP_ID}{ts}{payload}{SHOPEE_SECRET}".encode()).hexdigest()
+    headers = {
+        "Content-Type":  "application/json",
+        "Authorization": f"SHA256 Credential={SHOPEE_APP_ID}, Timestamp={ts}, Signature={sig}",
+    }
+    try:
+        r = requests.post(SHOPEE_GQL, headers=headers, data=payload, timeout=15)
+        return r.json()
+    except Exception as e:
+        print(f"  ⚠️  Shopee GQL erro: {e}")
+        return {}
+
+SHOPEE_QUERY = """
+query($keyword: String, $limit: Int, $page: Int) {
+  productOfferV2(keyword: $keyword, limit: $limit, page: $page, sortType: 2) {
+    nodes {
+      itemId
+      shopId
+      productName
+      price
+      priceMin
+      priceDiscountRate
+      commissionRate
+      sales
+      ratingStar
+      offerLink
+    }
+  }
+}
+"""
+
+def buscar_shopee(keyword: str, limit: int = 8) -> list:
+    data    = shopee_gql(SHOPEE_QUERY, {"keyword": keyword, "limit": limit, "page": 1})
+    nodes   = data.get("data", {}).get("productOfferV2", {}).get("nodes") or []
+    produtos = []
+    for p in nodes:
+        try:
+            preco    = float(p.get("priceMin") or p.get("price") or 0)
+            desconto = int(p.get("priceDiscountRate") or 0)
+            link     = p.get("offerLink", "")
+            titulo   = p.get("productName", "")
+            if not titulo or not link or preco == 0:
+                continue
+            item_id = f"shopee_{p.get('itemId')}_{p.get('shopId')}"
+            produtos.append({
+                "id":           item_id,
+                "titulo":       titulo,
+                "preco":        preco,
+                "preco_orig":   round(preco / (1 - desconto / 100), 2) if desconto > 0 else preco,
+                "desconto":     desconto,
+                "vendidos":     int(p.get("sales") or 0),
+                "permalink":    link,
+                "frete_gratis": False,
+                "fonte":        "shopee",
+            })
+        except Exception:
+            continue
+    return produtos
+
+def formatar_mensagem_shopee(produto: dict) -> str:
+    titulo  = produto["titulo"]
+    preco   = produto["preco"]
+    orig    = produto["preco_orig"]
+    desc    = produto["desconto"]
+    link    = produto["permalink"]
+
+    msg = (
+        f"🛍️ <b>OFERTA SHOPEE</b> | Tech & Setup\n\n"
+        f"📦 <b>{titulo}</b>\n\n"
+    )
+    if desc > 0 and orig != preco:
+        msg += f"💸 <s>R$ {orig:,.2f}</s>  →  "
+    msg += f"💰 <b>R$ {preco:,.2f}</b>"
+    if desc > 0:
+        msg += f"  <b>(-{desc}%)</b>"
+    msg += f"\n\n👉 <a href=\"{link}\">PEGAR OFERTA AGORA</a>\n\n"
+    msg += "#shopee #setup #tech #programador #gamer"
+    return msg
+
 # ─── FLUXO PRINCIPAL ──────────────────────────────────────────────────────────
 
 def rodar_busca():
@@ -417,8 +507,47 @@ def rodar_busca():
         time.sleep(2)  # Pausa entre mensagens
 
     salvar_enviados(enviados)
-    print(f"\n📤 {enviados_agora} produto(s) enviado(s) ao Telegram.")
-    enviar_resumo(enviados_agora)
+    print(f"\n📤 {enviados_agora} produto(s) ML enviado(s) ao Telegram.")
+
+    # ── Shopee ──────────────────────────────────────────────────────────────
+    print(f"\n🛍️  Buscando produtos Shopee...")
+    shopee_produtos = []
+    for kw in TECH_KEYWORDS[:10]:
+        prods = buscar_shopee(kw, limit=5)
+        print(f"   {kw}: {len(prods)} produto(s)")
+        shopee_produtos.extend(prods)
+        time.sleep(0.5)
+
+    # Remove duplicatas e já enviados
+    vistos_shopee = set()
+    shopee_filtrados = []
+    for p in shopee_produtos:
+        if p["id"] in enviados or p["id"] in vistos_shopee:
+            continue
+        if not (DESCONTO_MINIMO <= p["desconto"] <= 95):
+            continue
+        vistos_shopee.add(p["id"])
+        shopee_filtrados.append(p)
+
+    shopee_filtrados.sort(key=lambda x: x["desconto"], reverse=True)
+    print(f"   → {len(shopee_filtrados)} passaram no filtro")
+
+    enviados_shopee = 0
+    for produto in shopee_filtrados[:MAX_PRODUTOS]:
+        mensagem = formatar_mensagem_shopee(produto)
+        ok = enviar_telegram(mensagem)
+        if ok:
+            enviados.add(produto["id"])
+            enviados_shopee += 1
+            print(f"  ✅ [Shopee] {produto['titulo'][:50]} | -{produto['desconto']}%")
+        else:
+            print(f"  ❌ [Shopee] Falha: {produto['titulo'][:50]}")
+        time.sleep(2)
+
+    salvar_enviados(enviados)
+    total_enviados = enviados_agora + enviados_shopee
+    print(f"\n📤 Total enviado: {enviados_agora} ML + {enviados_shopee} Shopee = {total_enviados} ofertas")
+    enviar_resumo(total_enviados)
 
 def main():
     print("🤖 Bot de Afiliados ML → Telegram")
