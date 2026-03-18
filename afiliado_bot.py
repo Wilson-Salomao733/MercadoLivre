@@ -32,6 +32,11 @@ ML_TOKENS_FILE   = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tok
 TELEGRAM_TOKEN   = _require("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = _require("TELEGRAM_CHAT_ID")
 
+# WhatsApp Cloud API
+WA_TOKEN    = _require("WA_TOKEN")
+WA_PHONE_ID = _require("WA_PHONE_ID")
+WA_TO       = _require("WA_TO")
+
 # ID de afiliado do Mercado Livre
 MATT_TOOL = _require("MATT_TOOL")
 MATT_WORD = _require("MATT_WORD")
@@ -358,6 +363,28 @@ def enviar_cabecalho():
     )
     enviar_telegram(msg)
 
+def enviar_whatsapp(texto: str) -> bool:
+    """Envia mensagem de texto simples via WhatsApp Cloud API."""
+    url = f"https://graph.facebook.com/v22.0/{WA_PHONE_ID}/messages"
+    try:
+        r = requests.post(url,
+            headers={
+                "Authorization": f"Bearer {WA_TOKEN}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "messaging_product": "whatsapp",
+                "to": WA_TO,
+                "type": "text",
+                "text": {"body": texto},
+            },
+            timeout=15,
+        )
+        return r.status_code == 200
+    except Exception as e:
+        print(f"  ⚠️  WhatsApp erro: {e}")
+        return False
+
 def enviar_resumo(total: int):
     msg = (
         f"✅ <b>Rodada Finalizada</b>\n\n"
@@ -497,14 +524,25 @@ def rodar_busca():
     enviados_agora = 0
     for produto in filtrados[:MAX_PRODUTOS]:
         mensagem = formatar_mensagem(produto)
-        ok = enviar_telegram(mensagem)
-        if ok:
+        ok_tg = enviar_telegram(mensagem)
+        # WhatsApp não suporta HTML — envia versão texto puro
+        texto_wa = (
+            f"🔥 OFERTA TECH | Setup & Programador\n\n"
+            f"📦 {produto['titulo']}\n\n"
+            f"💰 R$ {produto['preco']:,.0f} (-{produto['desconto']}%)\n\n"
+            f"{'✅ Frete Grátis' if produto['frete_gratis'] else '🚚 Ver frete'}\n\n"
+            f"👉 {gerar_link_afiliado(produto)}\n\n"
+            f"#setup #tech #programador #gamer"
+        )
+        ok_wa = enviar_whatsapp(texto_wa)
+        if ok_tg:
             enviados.add(produto["id"])
             enviados_agora += 1
-            print(f"  ✅ Enviado: {produto['titulo'][:50]} | -{produto['desconto']}%")
+            wa_status = "✅WA" if ok_wa else "❌WA"
+            print(f"  ✅TG {wa_status} {produto['titulo'][:45]} | -{produto['desconto']}%")
         else:
-            print(f"  ❌ Falha ao enviar: {produto['titulo'][:50]}")
-        time.sleep(2)  # Pausa entre mensagens
+            print(f"  ❌ Falha: {produto['titulo'][:50]}")
+        time.sleep(2)
 
     salvar_enviados(enviados)
     print(f"\n📤 {enviados_agora} produto(s) ML enviado(s) ao Telegram.")
