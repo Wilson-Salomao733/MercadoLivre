@@ -47,7 +47,7 @@ SHOPEE_SECRET = _require("SHOPEE_SECRET")
 SHOPEE_GQL    = "https://open-api.affiliate.shopee.com.br/graphql"
 
 # Intervalo entre rodadas (em horas)
-INTERVALO_HORAS = 2
+INTERVALO_HORAS = 12
 
 # Desconto mínimo para postar (%)
 DESCONTO_MINIMO = 10
