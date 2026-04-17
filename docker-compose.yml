@@ -8,6 +8,8 @@ services:
     volumes:
       - ./tokens.json:/app/tokens.json
       - ./enviados.json:/app/enviados.json
+      - ./output_videos:/app/output_videos
+      - ./v2/CONTENT_STUDIO/audios:/app/v2/CONTENT_STUDIO/audios:ro
     environment:
       - PYTHONUNBUFFERED=1
     logging:

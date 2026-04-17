@@ -5,3 +5,21 @@ requirements_bot.txt
 __pycache__/
 *.pyc
 .env
+# v2 inteiro fica fora da imagem (áudios entram via volume no docker-compose)
+v2/
+output_videos/
+ImagensEVideos/
+audios/
+tokens.json
+enviados.json
+*.gpg
+# arquivos de mídia
+*.mp4
+*.mp3
+*.wav
+*.m4a
+*.webp
+*.jpg
+*.jpeg
+*.png
+*.gif

@@ -10,6 +10,7 @@ import re
 import os
 import hashlib
 import schedule
+import threading
 from datetime import datetime
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
@@ -40,6 +41,10 @@ WA_TO       = _require("WA_TO")
 # ID de afiliado do Mercado Livre
 MATT_TOOL = _require("MATT_TOOL")
 MATT_WORD = _require("MATT_WORD")
+
+# Bot de comandos (/refazer)
+CMD_BOT_TOKEN = os.getenv("CMD_BOT_TOKEN", "")
+CMD_CHAT_ID   = os.getenv("CMD_CHAT_ID", "")
 
 # Credenciais Shopee Afiliados
 SHOPEE_APP_ID = _require("SHOPEE_APP_ID")
@@ -423,6 +428,7 @@ query($keyword: String, $limit: Int, $page: Int) {
       commissionRate
       sales
       ratingStar
+      imageUrl
       offerLink
     }
   }
@@ -450,6 +456,7 @@ def buscar_shopee(keyword: str, limit: int = 8) -> list:
                 "desconto":     desconto,
                 "vendidos":     int(p.get("sales") or 0),
                 "permalink":    link,
+                "img_url":      p.get("imageUrl", ""),
                 "frete_gratis": False,
                 "fonte":        "shopee",
             })
@@ -587,6 +594,127 @@ def rodar_busca():
     print(f"\n📤 Total enviado: {enviados_agora} ML + {enviados_shopee} Shopee = {total_enviados} ofertas")
     enviar_resumo(total_enviados)
 
+    # ── Vídeo promocional do produto TOP com desconto ────────────────────────
+    # Pega o produto Shopee com maior desconto E que tenha imagem
+    produto_video = next(
+        (p for p in shopee_filtrados if p.get("img_url")),
+        None,
+    )
+    if produto_video:
+        print(f"\n🎬 Gerando video do produto TOP: {produto_video['titulo'][:50]}")
+        try:
+            from video_afiliado import gerar_e_enviar_video_produto
+            gerar_e_enviar_video_produto({
+                "titulo":   produto_video["titulo"],
+                "preco":    produto_video["preco"],
+                "desconto": produto_video["desconto"],
+                "img_url":  produto_video["img_url"],
+                "link":     produto_video["permalink"],
+            })
+        except Exception as e:
+            print(f"  ⚠️  Video: {e}")
+    else:
+        print("\n⚠️  Nenhum produto Shopee com imagem para gerar video.")
+
+# ─── LISTENER DE COMANDOS ─────────────────────────────────────────────────────
+
+# Controla se já tem um ciclo rodando (evita sobreposição)
+_ciclo_em_andamento = threading.Lock()
+
+
+def _responder_cmd(texto: str):
+    """Envia mensagem de volta ao chat de comando."""
+    if not CMD_BOT_TOKEN or not CMD_CHAT_ID:
+        return
+    try:
+        requests.post(
+            f"https://api.telegram.org/bot{CMD_BOT_TOKEN}/sendMessage",
+            json={"chat_id": CMD_CHAT_ID, "text": texto},
+            timeout=10,
+        )
+    except Exception:
+        pass
+
+
+def _executar_ciclo_em_thread():
+    """Roda rodar_busca() em thread separada para não bloquear o polling."""
+    if not _ciclo_em_andamento.acquire(blocking=False):
+        _responder_cmd("⏳ Já tem um ciclo rodando. Aguarde terminar.")
+        return
+
+    def _run():
+        try:
+            _responder_cmd("🔄 Iniciando ciclo agora...")
+            rodar_busca()
+            _responder_cmd("✅ Ciclo concluído! Ofertas e vídeo enviados.")
+        except Exception as e:
+            _responder_cmd(f"❌ Erro no ciclo: {e}")
+        finally:
+            _ciclo_em_andamento.release()
+
+    threading.Thread(target=_run, daemon=True).start()
+
+
+def escutar_comandos():
+    """
+    Polling de getUpdates — roda em thread própria.
+    Aceita /refazer apenas do CMD_CHAT_ID autorizado.
+    """
+    if not CMD_BOT_TOKEN or not CMD_CHAT_ID:
+        print("⚠️  CMD_BOT_TOKEN/CMD_CHAT_ID não definidos. Listener desativado.")
+        return
+
+    offset  = 0
+    api_url = f"https://api.telegram.org/bot{CMD_BOT_TOKEN}"
+    print(f"👂 Listener de comandos ativo (bot: ...{CMD_BOT_TOKEN[-10:]})")
+
+    while True:
+        try:
+            resp = requests.get(
+                f"{api_url}/getUpdates",
+                params={"offset": offset, "timeout": 30, "allowed_updates": ["message"]},
+                timeout=40,
+            )
+            if resp.status_code != 200:
+                time.sleep(5)
+                continue
+
+            updates = resp.json().get("result", [])
+            for upd in updates:
+                offset = upd["update_id"] + 1
+                msg    = upd.get("message", {})
+                chat   = str(msg.get("chat", {}).get("id", ""))
+                texto  = msg.get("text", "").strip().lower()
+
+                # Só aceita comandos do chat autorizado
+                if chat != str(CMD_CHAT_ID):
+                    continue
+
+                if texto in ("/refazer", "/refazer@" + CMD_BOT_TOKEN.split(":")[0]):
+                    print(f"📩 /refazer recebido de {chat}")
+                    _executar_ciclo_em_thread()
+
+                elif texto == "/status":
+                    em_andamento = not _ciclo_em_andamento.acquire(blocking=False)
+                    if not em_andamento:
+                        _ciclo_em_andamento.release()
+                    status = "🔄 Rodando agora" if em_andamento else "😴 Aguardando próximo ciclo"
+                    _responder_cmd(
+                        f"🤖 *Bot Afiliado*\n\n"
+                        f"Status: {status}\n"
+                        f"Intervalo: {INTERVALO_HORAS}h\n\n"
+                        f"Comandos:\n"
+                        f"/refazer — executa ciclo agora\n"
+                        f"/status  — mostra este painel"
+                    )
+
+        except requests.exceptions.ReadTimeout:
+            continue
+        except Exception as e:
+            print(f"  ⚠️  Listener erro: {e}")
+            time.sleep(10)
+
+
 def main():
     print("🤖 Bot de Afiliados ML → Telegram")
     print(f"📡 Canal: {TELEGRAM_CHAT_ID}")
@@ -599,6 +727,9 @@ def main():
         return
 
     print("✅ Telegram conectado!\n")
+
+    # Inicia listener de comandos em thread separada
+    threading.Thread(target=escutar_comandos, daemon=True).start()
 
     # Primeira rodada imediata
     rodar_busca()
