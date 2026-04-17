@@ -54,7 +54,7 @@ GROQ_API_KEY     = os.getenv("GROQ_API_KEY", "")
 # ── Constantes ─────────────────────────────────────────────────────────────────
 SHOPEE_GQL_URL = "https://open-api.affiliate.shopee.com.br/graphql"
 GROQ_URL       = "https://api.groq.com/openai/v1/chat/completions"
-AUDIOS_DIR     = os.path.join(BASE_DIR, "v2", "CONTENT_STUDIO", "audios")
+AUDIOS_DIR     = os.path.join(BASE_DIR, "audios")
 OUTPUT_DIR     = os.path.join(BASE_DIR, "output_videos")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
