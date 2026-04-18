@@ -53,6 +53,7 @@ SHOPEE_GQL    = "https://open-api.affiliate.shopee.com.br/graphql"
 
 # Intervalo entre rodadas (em horas)
 INTERVALO_HORAS = 12
+CRON_MODE = os.getenv("CRON_MODE", "0").strip().lower() in {"1", "true", "yes", "on"}
 
 # Desconto mínimo para postar (%)
 DESCONTO_MINIMO = 10
@@ -718,7 +719,10 @@ def escutar_comandos():
 def main():
     print("🤖 Bot de Afiliados ML → Telegram")
     print(f"📡 Canal: {TELEGRAM_CHAT_ID}")
-    print(f"⏰ Intervalo: a cada {INTERVALO_HORAS}h\n")
+    if CRON_MODE:
+        print("⏰ Modo CRON: execução única por disparo\n")
+    else:
+        print(f"⏰ Intervalo: a cada {INTERVALO_HORAS}h\n")
 
     # Testa conexão Telegram
     ok = enviar_telegram("🤖 <b>Bot Afiliado Conectado!</b>\n\nAguarde as ofertas tech chegarem aqui... 🛒")
@@ -727,6 +731,12 @@ def main():
         return
 
     print("✅ Telegram conectado!\n")
+
+    # Modo cron: roda 1 ciclo e encerra (sem listener e sem loop infinito)
+    if CRON_MODE:
+        rodar_busca()
+        print("\n✅ Execução única finalizada (CRON_MODE=1).")
+        return
 
     # Inicia listener de comandos em thread separada
     threading.Thread(target=escutar_comandos, daemon=True).start()
