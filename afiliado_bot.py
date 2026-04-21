@@ -196,6 +196,15 @@ def buscar_produtos_por_keyword(keyword: str, token: str, limit: int = 10) -> li
                 link   = titulo_el.get("href", "").split("?")[0]
                 if not link:
                     continue
+                img_el = card.find("img")
+                img_url = ""
+                if img_el:
+                    img_url = (
+                        img_el.get("src")
+                        or img_el.get("data-src")
+                        or img_el.get("data-srcset", "").split(" ")[0]
+                        or ""
+                    )
 
                 # ID do produto (MLB...)
                 item_id_match = re.search(r"MLB\d{7,12}", link)
@@ -265,6 +274,8 @@ def buscar_produtos_por_keyword(keyword: str, token: str, limit: int = 10) -> li
                     "categoria":    "",
                     "condicao":     "new",
                     "frete_gratis": frete_gratis,
+                    "img_url":      img_url,
+                    "fonte":        "ml",
                 })
             except Exception:
                 continue
@@ -596,11 +607,13 @@ def rodar_busca():
     enviar_resumo(total_enviados)
 
     # ── Vídeo promocional do produto TOP com desconto ────────────────────────
-    # Pega o produto Shopee com maior desconto E que tenha imagem
+    # Prioriza Shopee; fallback para Mercado Livre com imagem quando necessário
     produto_video = next(
         (p for p in shopee_filtrados if p.get("img_url")),
         None,
     )
+    if not produto_video:
+        produto_video = next((p for p in filtrados if p.get("img_url")), None)
     if produto_video:
         print(f"\n🎬 Gerando video do produto TOP: {produto_video['titulo'][:50]}")
         try:
